@@ -1063,13 +1063,20 @@ spec:
 EOF
 
   # /etc/hosts 설정 (curl 검증용)
-  if ! grep -q "web.k8s.local" /etc/hosts 2>/dev/null; then
-    NODE_IP=$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "127.0.0.1")
-    warn "/etc/hosts에 'web.k8s.local' 추가 필요:"
-    warn "  echo '${NODE_IP} web.k8s.local' | sudo tee -a /etc/hosts"
+  # NodeIP가 아닌 파드 IP로 등록해야 443 직접 접근 가능!!
+  wait_for_deployment nginx-ns config-app
+  POD_IP=$(kubectl get pod -n nginx-ns -l app=config-app -o jsonpath='{.items[0].status.podIP}' 2>/dev/null || echo "")
+  if [ -n "$POD_IP" ]; then
+    # 기존 web.k8s.local 항목 제거 후 파드 IP로 재등록
+    sudo sed -i '/web\.k8s\.local/d' /etc/hosts
+    echo "${POD_IP} web.k8s.local" | sudo tee -a /etc/hosts > /dev/null
+    success "/etc/hosts에 '${POD_IP} web.k8s.local' 등록 완료 (파드 IP)"
+  else
+    warn "파드 IP 획득 실패 → 수동 등록 필요:"
+    warn "  POD_IP=\$(kubectl get pod -n nginx-ns -l app=config-app -o jsonpath='{.items[0].status.podIP}')"
+    warn "  echo '\${POD_IP} web.k8s.local' | sudo tee -a /etc/hosts"
   fi
 
-  wait_for_deployment nginx-ns config-app
   success "문제 16 환경 구축 완료"
   echo -e "  ${YELLOW}▶ 확인:${NC} kubectl get cm app-config -n nginx-ns -o yaml"
   echo -e "  ${YELLOW}※ 실습:${NC} ssl_protocols에 TLSv1.2 추가 → rollout restart → immutable: true 설정"
